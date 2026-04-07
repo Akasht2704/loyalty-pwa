@@ -18,6 +18,7 @@ export function QrScanner({
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [isValidScan, setIsValidScan] = useState<boolean | null>(null);
   const [invalidHint, setInvalidHint] = useState(false);
+  const [couponData, setCouponData] = useState<any>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const decodeErrorCountRef = useRef(0);
 
@@ -35,8 +36,22 @@ export function QrScanner({
         await scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 260, height: 260 } },
-          (decodedText) => {
+          async (decodedText) => {
             setLastScan(decodedText);
+            const response = await fetch("/api/qrscan", {
+              method: "POST",
+              body: JSON.stringify({ qrcode: decodedText }),
+            });
+            const data = await response.json();
+            if (data.success) {
+              setIsValidScan(true);
+              setCouponData(data.data);
+              onDecoded?.(decodedText);
+            } else {
+              setIsValidScan(false);
+              onDecoded?.(decodedText);
+            }
+
             const valid = validate ? validate(decodedText) : decodedText.trim().length > 0;
             setIsValidScan(valid);
             decodeErrorCountRef.current = 0;
@@ -120,6 +135,11 @@ export function QrScanner({
             <p className="break-all rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
               {lastScan}
             </p>
+            {couponData && (
+              <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
+                {couponData.product_name}
+              </p>
+            )}
           </>
         )}
       </div>
