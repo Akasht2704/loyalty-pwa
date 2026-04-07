@@ -6,12 +6,20 @@ import { useEffect, useRef, useState } from "react";
 type QrScannerProps = {
   onDecoded?: (text: string) => void;
   enabled?: boolean;
+  validate?: (text: string) => boolean;
 };
 
-export function QrScanner({ onDecoded, enabled = true }: QrScannerProps) {
+export function QrScanner({
+  onDecoded,
+  enabled = true,
+  validate,
+}: QrScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<string | null>(null);
+  const [isValidScan, setIsValidScan] = useState<boolean | null>(null);
+  const [invalidHint, setInvalidHint] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const decodeErrorCountRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) return;
@@ -21,15 +29,26 @@ export function QrScanner({ onDecoded, enabled = true }: QrScannerProps) {
     const start = async () => {
       const scanner = new Html5Qrcode(id);
       scannerRef.current = scanner;
+      decodeErrorCountRef.current = 0;
+      setInvalidHint(false);
       try {
         await scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 260, height: 260 } },
           (decodedText) => {
             setLastScan(decodedText);
+            const valid = validate ? validate(decodedText) : decodedText.trim().length > 0;
+            setIsValidScan(valid);
+            decodeErrorCountRef.current = 0;
+            setInvalidHint(false);
             onDecoded?.(decodedText);
           },
-          () => {}
+          () => {
+            decodeErrorCountRef.current += 1;
+            if (decodeErrorCountRef.current > 20) {
+              setInvalidHint(true);
+            }
+          }
         );
       } catch {
         if (!cancelled) {
@@ -76,11 +95,34 @@ export function QrScanner({ onDecoded, enabled = true }: QrScannerProps) {
         id="qr-reader-inline"
         className="overflow-hidden rounded-2xl bg-black/5 dark:bg-white/5 [&_video]:rounded-2xl"
       />
-      {lastScan && !error && (
-        <p className="mt-3 break-all rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
-          {lastScan}
-        </p>
-      )}
+      <div className="mt-3 space-y-2">
+        {!lastScan && !error && (
+          <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+            Waiting for QR code...
+          </p>
+        )}
+        {!lastScan && invalidHint && !error && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            QR not recognized yet. Make sure it is a valid QR and fully visible.
+          </p>
+        )}
+        {lastScan && !error && (
+          <>
+            <p
+              className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                isValidScan
+                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200"
+                  : "bg-rose-50 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200"
+              }`}
+            >
+              {isValidScan ? "Valid QR code scanned" : "Invalid QR code"}
+            </p>
+            <p className="break-all rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
+              {lastScan}
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }
