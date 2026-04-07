@@ -7,6 +7,6 @@ export async function POST(request: NextRequest) {
     const [result] = await db.execute("SELECT * FROM coupons WHERE qr_code = ?", [qrcode]);
     return NextResponse.json({ success: true, data: result });
     } catch (error) {
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+        return NextResponse.json({ error: (error as Error).message }, { status: 500 });
     }
 }
