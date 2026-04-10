@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ScanPermissionGate } from "../../components/ScanPermissionGate";
-export const metadata = {
+export const metadata = { 
   title: "Scan QR",
 };
 export default function ScanPage() {

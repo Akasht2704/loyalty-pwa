@@ -1,4 +1,5 @@
 import {
+  AuthActionSection,
   BannerSection,
   HomePageShell,
   LogoSection,
@@ -8,11 +9,12 @@ import {
 
 export default function Home() {
   return (
-
-   <HomePageShell><LogoSection />
-   <BannerSection />
-   <QrScanSection />
-   <ServicesSection />
-   </ HomePageShell>
+    <HomePageShell>
+      <LogoSection />
+      <BannerSection />
+      <QrScanSection />
+      <ServicesSection />
+      <AuthActionSection />
+    </HomePageShell>
   );
 }

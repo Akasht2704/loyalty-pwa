@@ -64,7 +64,7 @@ export function ScanPermissionGate() {
     }
     setBusy(false);
   };
-
+ 
   return (
     <div className="space-y-4">
       {!canScan && (
