@@ -75,16 +75,16 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-lg items-center bg-zinc-100 px-4 py-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-lg items-center bg-slate-800 px-4 py-6">
       <section className="w-full p-2">
         <div className="mb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">
             Welcome Back
           </p>
-          <h1 className="mt-1 text-2xl font-semibold text-zinc-900">
+          <h1 className="mt-1 text-2xl font-semibold text-slate-100">
             Login
           </h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-slate-300">
             {showPasswordStep
               ? "Phone verified. Enter your password to continue."
               : "Enter your phone number to continue."}
@@ -93,7 +93,7 @@ export default function LoginPage() {
 
         <form className="mt-5 space-y-4" onSubmit={onSubmit}>
           <label className="block">
-            <span className="text-sm text-zinc-700">
+            <span className="text-sm text-slate-200">
               Phone Number
             </span>
             <input
@@ -102,14 +102,14 @@ export default function LoginPage() {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               disabled={showPasswordStep}
-              className="mt-1 w-full border-0 border-b border-zinc-300 bg-transparent px-1 py-3 text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-indigo-500"
+              className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
               placeholder="Enter phone number"
             />
           </label>
 
           {showPasswordStep ? (
             <label className="block">
-              <span className="text-sm text-zinc-700">
+              <span className="text-sm text-slate-200">
                 Password
               </span>
               <input
@@ -117,7 +117,7 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 w-full border-0 border-b border-zinc-300 bg-transparent px-1 py-3 text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-indigo-500"
+                className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
                 placeholder="Enter password"
               />
             </label>
@@ -132,13 +132,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="mx-auto block w-2/3 rounded-2xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-md transition hover:bg-emerald-500 active:scale-[0.99] disabled:opacity-60"
+            className="mx-auto block w-2/3 rounded-2xl bg-indigo-500 px-4 py-3 font-semibold text-white shadow-md shadow-indigo-900/30 transition hover:bg-indigo-400 active:scale-[0.99] disabled:opacity-60"
           >
             {loading ? "Checking..." : showPasswordStep ? "SIGN IN" : "Continue"}
           </button>
         </form>
 
-        <p className="mt-5 text-center text-xs text-zinc-500">
+        <p className="mt-5 text-center text-xs text-slate-400">
           Secure access for your loyalty account
         </p>
       </section>

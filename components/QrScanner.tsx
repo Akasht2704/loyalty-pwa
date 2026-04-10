@@ -138,7 +138,7 @@ export function QrScanner({
             </p>
             {couponData && (
               <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
-                {couponData[0].product_name}
+                {couponData[0]?.product_name}
               </p>
             )}
           </>
