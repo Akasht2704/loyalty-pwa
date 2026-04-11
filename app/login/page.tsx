@@ -9,7 +9,8 @@ type LoginResponse = {
   token?: string;
   user?: Record<string, unknown>;
   requiresRegistration?: boolean;
-  requiresPassword?: boolean;
+  requiresOtp?: boolean;
+  existingUser?: boolean;
   phone?: string;
   error?: string;
 };
@@ -18,8 +19,8 @@ export default function LoginPage() {
   const router = useRouter();
   const appId = Number(process.env.NEXT_PUBLIC_APP_ID);
   const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPasswordStep, setShowPasswordStep] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [showOtpStep, setShowOtpStep] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -34,7 +35,7 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phone,
-          password: showPasswordStep ? password : undefined,
+          otp: showOtpStep ? otp : undefined,
           appId: Number.isInteger(appId) ? appId : undefined,
         }),
       });
@@ -42,12 +43,19 @@ export default function LoginPage() {
       const data = (await res.json()) as LoginResponse;
 
       if (data.requiresRegistration) {
-        router.push(`/register?phone=${encodeURIComponent(phone)}`);
+        const targetPhone = data.phone ?? phone;
+        const params = new URLSearchParams({
+          phone: targetPhone,
+        });
+        if (data.existingUser) {
+          params.set("existing", "1");
+        }
+        router.push(`/register?${params.toString()}`);
         return;
       }
 
-      if (data.requiresPassword) {
-        setShowPasswordStep(true);
+      if (data.requiresOtp) {
+        setShowOtpStep(true);
         return;
       }
 
@@ -75,73 +83,81 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-lg items-center bg-slate-800 px-4 py-6">
-      <section className="w-full p-2">
-        <div className="mb-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">
-            Welcome Back
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-100">
-            Login
-          </h1>
-          <p className="mt-1 text-sm text-slate-300">
-            {showPasswordStep
-              ? "Phone verified. Enter your password to continue."
-              : "Enter your phone number to continue."}
-          </p>
-        </div>
+    <main className="mx-auto grid min-h-screen w-full max-w-lg grid-rows-[auto_1fr] bg-slate-800">
+      <p className="px-4 pt-[max(1.25rem,env(safe-area-inset-top))] pb-2 text-center text-2xl font-semibold tracking-[0.2em] text-slate-100">
+        WELCOME
+      </p>
+      <div className="flex min-h-0 items-center justify-center px-4 py-6">
+        <section className="w-full p-2">
+          <div className="mb-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">
+              Welcome Back
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold text-slate-100">
+              Login
+            </h1>
+            <p className="mt-1 text-sm text-slate-300">
+              {showOtpStep
+                ? "Enter the OTP sent to your phone to continue."
+                : "Enter your phone number to continue."}
+            </p>
+          </div>
 
-        <form className="mt-5 space-y-4" onSubmit={onSubmit}>
-          <label className="block">
-            <span className="text-sm text-slate-200">
-              Phone Number
-            </span>
-            <input
-              type="tel"
-              required
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              disabled={showPasswordStep}
-              className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
-              placeholder="Enter phone number"
-            />
-          </label>
-
-          {showPasswordStep ? (
+          <form className="mt-5 space-y-4" onSubmit={onSubmit}>
             <label className="block">
               <span className="text-sm text-slate-200">
-                Password
+                Phone Number
               </span>
               <input
-                type="password"
+                type="tel"
                 required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={showOtpStep}
                 className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
-                placeholder="Enter password"
+                placeholder="Enter phone number"
               />
             </label>
-          ) : null}
 
-          {error ? (
-            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </p>
-          ) : null}
+            {showOtpStep ? (
+              <label className="block">
+                <span className="text-sm text-slate-200">
+                  OTP
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  maxLength={8}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
+                  placeholder="Enter OTP"
+                />
+              </label>
+            ) : null}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="mx-auto block w-2/3 rounded-2xl bg-indigo-500 px-4 py-3 font-semibold text-white shadow-md shadow-indigo-900/30 transition hover:bg-indigo-400 active:scale-[0.99] disabled:opacity-60"
-          >
-            {loading ? "Checking..." : showPasswordStep ? "SIGN IN" : "Continue"}
-          </button>
-        </form>
+            {error ? (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {error}
+              </p>
+            ) : null}
 
-        <p className="mt-5 text-center text-xs text-slate-400">
-          Secure access for your loyalty account
-        </p>
-      </section>
+            <button
+              type="submit"
+              disabled={loading}
+              className="mx-auto block w-2/3 rounded-2xl bg-indigo-500 px-4 py-3 font-semibold text-white shadow-md shadow-indigo-900/30 transition hover:bg-indigo-400 active:scale-[0.99] disabled:opacity-60"
+            >
+              {loading ? "Checking..." : showOtpStep ? "SIGN IN" : "Continue"}
+            </button>
+          </form>
+
+          <p className="mt-5 text-center text-xs text-slate-400">
+            Secure access for your loyalty account
+          </p>
+        </section>
+      </div>
     </main>
   );
 }

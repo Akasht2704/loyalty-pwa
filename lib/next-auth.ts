@@ -1,14 +1,7 @@
 import jwt from "jsonwebtoken";
 import CredentialsProvider from "next-auth/providers/credentials";
 import type { NextAuthOptions } from "next-auth";
-
-type AuthTokenPayload = {
-  userId: number;
-  phone: string;
-  appId: number;
-  roleId: number;
-  brandId: number | null;
-};
+import { parseAuthJwtPayload } from "@/lib/auth";
 
 const getJwtSecret = () => {
   const secret =
@@ -37,8 +30,9 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const decoded = jwt.verify(rawToken, getJwtSecret()) as AuthTokenPayload;
-        if (!decoded?.userId || !decoded?.phone) {
+        const decoded = jwt.verify(rawToken, getJwtSecret());
+        const payload = parseAuthJwtPayload(decoded);
+        if (!payload) {
           return null;
         }
 
@@ -52,12 +46,16 @@ export const authOptions: NextAuthOptions = {
         }
 
         return {
-          id: String(decoded.userId),
-          name: String(parsedUser.name ?? ""),
-          phone: decoded.phone,
-          appId: decoded.appId,
-          roleId: decoded.roleId,
-          brandId: decoded.brandId,
+          id: String(payload.userId),
+          name: String(
+            typeof parsedUser.name === "string" && parsedUser.name
+              ? parsedUser.name
+              : payload.name,
+          ),
+          phone: payload.phone,
+          appId: payload.appId,
+          roleId: payload.roleId,
+          brandId: payload.brandId,
           accessToken: rawToken,
         };
       },

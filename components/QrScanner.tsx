@@ -1,6 +1,7 @@
 "use client";
 
 import { Html5Qrcode } from "html5-qrcode";
+import { signIn, useSession } from "next-auth/react";
 import { useEffect, useRef, useState } from "react";
 
 type QrScannerProps = {
@@ -9,11 +10,40 @@ type QrScannerProps = {
   validate?: (text: string) => boolean;
 };
 
+/** Min time between API calls for the same QR payload (camera often decodes every frame). */
+const SAME_QR_API_COOLDOWN_MS = 5500;
+
+function readDeviceCoordinates(): Promise<{
+  latitude: number;
+  longitude: number;
+} | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        }),
+      () => resolve(null),
+      {
+        enableHighAccuracy: false,
+        maximumAge: 60_000,
+        timeout: 12_000,
+      },
+    );
+  });
+}
+
 export function QrScanner({
   onDecoded,
   enabled = true,
   validate,
 }: QrScannerProps) {
+  const { data: session } = useSession();
+  const accessTokenRef = useRef<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [isValidScan, setIsValidScan] = useState<boolean | null>(null);
@@ -21,6 +51,11 @@ export function QrScanner({
   const [couponData, setCouponData] = useState<any>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const decodeErrorCountRef = useRef(0);
+  const lastApiCallAtByQrRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    accessTokenRef.current = session?.accessToken;
+  }, [session?.accessToken]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -37,27 +72,67 @@ export function QrScanner({
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 260, height: 260 } },
           async (decodedText) => {
-            setLastScan(decodedText);
+            const normalized = decodedText.trim();
+            if (!normalized) return;
+
+            const now = Date.now();
+            const lastAt = lastApiCallAtByQrRef.current.get(normalized) ?? 0;
+            if (now - lastAt < SAME_QR_API_COOLDOWN_MS) {
+              return;
+            }
+            lastApiCallAtByQrRef.current.set(normalized, now);
+
+            setLastScan(normalized);
+            const coords = await readDeviceCoordinates();
+            const headers: Record<string, string> = {
+              "Content-Type": "application/json",
+            };
+            const token = accessTokenRef.current;
+            if (token) {
+              headers.Authorization = `Bearer ${token}`;
+            }
             const response = await fetch("/api/qrscan", {
               method: "POST",
-              body: JSON.stringify({ qrcode: decodedText }),
+              headers,
+              credentials: "include",
+              body: JSON.stringify({
+                qrcode: normalized,
+                ...(coords
+                  ? { latitude: coords.latitude, longitude: coords.longitude }
+                  : {}),
+              }),
             });
             const data = await response.json();
-            if (data.success) {
-              setIsValidScan(true);
-              setCouponData(data.data);
-              console.log(data.data);
-              onDecoded?.(decodedText);
+
+            const rows = data.data;
+            const hasCoupon =
+              Array.isArray(rows) && rows.length > 0 && data.success === true;
+            const formatOk = validate
+              ? validate(normalized)
+              : normalized.length > 0;
+            setIsValidScan(Boolean(hasCoupon && formatOk));
+            if (hasCoupon) {
+              setCouponData(rows);
             } else {
-              setIsValidScan(false);
-              onDecoded?.(decodedText);
+              setCouponData(null);
             }
 
-            const valid = validate ? validate(decodedText) : decodedText.trim().length > 0;
-            setIsValidScan(valid);
+            if (
+              hasCoupon &&
+              typeof data.newToken === "string" &&
+              data.user &&
+              typeof data.user === "object"
+            ) {
+              await signIn("credentials", {
+                redirect: false,
+                token: data.newToken,
+                user: JSON.stringify(data.user),
+              });
+            }
+
             decodeErrorCountRef.current = 0;
             setInvalidHint(false);
-            onDecoded?.(decodedText);
+            onDecoded?.(normalized);
           },
           () => {
             decodeErrorCountRef.current += 1;

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { RowDataPacket } from "mysql2/promise";
-import bcrypt from "bcryptjs";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { db } from "@/lib/db";
 import { signAuthToken } from "@/lib/auth";
+
+/** Temporary fixed OTP; replace with SMS-generated codes later. */
+const HARDCODED_OTP = "1234";
+const OTP_TTL_MINUTES = 10;
 
 type UserRow = RowDataPacket & {
   id?: number;
@@ -33,7 +36,7 @@ const resolveAppId = (rawAppId?: number) => {
 
 const getDefaultRole = async () => {
   const [defaultRoles] = await db.execute<DefaultRoleRow[]>(
-    "SELECT id AS role_id, name FROM roles WHERE is_default = TRUE LIMIT 1"
+    "SELECT id AS role_id, name FROM roles WHERE is_default = TRUE AND brand_id IS NULL LIMIT 1",
   );
   const defaultRole = defaultRoles[0];
 
@@ -47,9 +50,13 @@ const getDefaultRole = async () => {
   };
 };
 
+type OtpRow = RowDataPacket & {
+  id?: number;
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const { phone, password, appId } = await request.json();
+    const { phone, otp, appId } = await request.json();
 
     if (!phone || typeof phone !== "string") {
       return NextResponse.json({ error: "Phone is required" }, { status: 400 });
@@ -71,32 +78,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (!password || typeof password !== "string") {
-      return NextResponse.json({
-        requiresPassword: true,
-        phone: normalizedPhone,
-      });
-    }
-
-    const plainPassword = password;
-    const defaultRole = await getDefaultRole();
-
-    const passwordHash = user.password;
-    if (!passwordHash) {
-      return NextResponse.json(
-        { error: "Invalid phone or password" },
-        { status: 401 }
-      );
-    }
-
-    const isPasswordValid = await bcrypt.compare(plainPassword, passwordHash);
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        { error: "Invalid phone or password" },
-        { status: 401 }
-      );
-    }
-
     const userId = user.user_id ?? user.id;
     if (!userId) {
       throw new Error("Unable to resolve user id");
@@ -107,21 +88,59 @@ export async function POST(request: NextRequest) {
       [userId, resolvedAppId]
     );
 
-    let roleId = defaultRole.roleId;
-    let brandId: number | null = null;
-
     if (roles.length === 0) {
-      await db.execute(
-        "INSERT INTO user_roles (user_id, app_id, role_id, role_name, brand_id) VALUES (?, ?, ?, ?, NULL)",
-        [userId, resolvedAppId, defaultRole.roleId, defaultRole.roleName]
-      );
-    } else {
-      roleId = roles[0].role_id ?? defaultRole.roleId;
-      brandId = roles[0].brand_id ?? null;
+      return NextResponse.json({
+        requiresRegistration: true,
+        phone: normalizedPhone,
+        existingUser: true,
+      });
     }
+
+    const otpTrimmed =
+      typeof otp === "string" && otp.trim().length > 0 ? otp.trim() : undefined;
+
+    if (!otpTrimmed) {
+      await db.execute<ResultSetHeader>(
+        `INSERT INTO otps (phone, app_id, code, expires_at)
+         VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+        [normalizedPhone, resolvedAppId, HARDCODED_OTP, OTP_TTL_MINUTES],
+      );
+
+      return NextResponse.json({
+        requiresOtp: true,
+        phone: normalizedPhone,
+      });
+    }
+
+    const [otpRows] = await db.execute<OtpRow[]>(
+      `SELECT id FROM otps
+       WHERE phone = ? AND app_id = ? AND code = ?
+         AND expires_at > NOW() AND consumed_at IS NULL
+       ORDER BY id DESC
+       LIMIT 1`,
+      [normalizedPhone, resolvedAppId, otpTrimmed],
+    );
+
+    const otpRow = otpRows[0];
+    if (!otpRow?.id) {
+      return NextResponse.json(
+        { error: "Invalid or expired OTP" },
+        { status: 401 },
+      );
+    }
+
+    await db.execute<ResultSetHeader>(
+      "UPDATE otps SET consumed_at = NOW() WHERE id = ?",
+      [otpRow.id],
+    );
+
+    const defaultRole = await getDefaultRole();
+    const roleId = roles[0].role_id ?? defaultRole.roleId;
+    const brandId = roles[0].brand_id ?? null;
 
     const token = signAuthToken({
       userId,
+      name: user.name ?? "",
       phone: user.phone ?? normalizedPhone,
       appId: resolvedAppId,
       roleId,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
@@ -7,6 +8,12 @@ import { signAuthToken } from "@/lib/auth";
 type UserRow = RowDataPacket & {
   id?: number;
   user_id?: number;
+  name?: string;
+  phone?: string;
+};
+
+type UserRoleExistsRow = RowDataPacket & {
+  n?: number;
 };
 
 type DefaultRoleRow = RowDataPacket & {
@@ -41,11 +48,11 @@ const getDefaultRole = async () => {
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, phone, password, appId } = await request.json();
+    const { name, phone, appId } = await request.json();
 
-    if (!name || !phone || !password) {
+    if (!name || !phone) {
       return NextResponse.json(
-        { error: "Name, phone and password are required" },
+        { error: "Name and phone are required" },
         { status: 400 }
       );
     }
@@ -55,27 +62,52 @@ export async function POST(request: NextRequest) {
     const resolvedAppId = resolveAppId(appId);
     const defaultRole = await getDefaultRole();
 
+    const unusablePasswordHash = await bcrypt.hash(
+      randomBytes(32).toString("hex"),
+      10,
+    );
+
     const [existingUsers] = await db.execute<UserRow[]>(
       "SELECT * FROM users WHERE phone = ? LIMIT 1",
       [normalizedPhone]
     );
-    if (existingUsers.length > 0) {
-      return NextResponse.json(
-        { error: "Phone already registered" },
-        { status: 409 }
+    const existing = existingUsers[0];
+
+    let userId: number;
+
+    if (existing) {
+      const resolvedUserId = existing.user_id ?? existing.id;
+      if (!resolvedUserId) {
+        throw new Error("Unable to resolve user id");
+      }
+
+      await db.execute(
+        "UPDATE users SET name = ?, password = ? WHERE phone = ?",
+        [normalizedName, unusablePasswordHash, normalizedPhone]
       );
-    }
 
-    const passwordHash = await bcrypt.hash(String(password), 10);
+      const [existingAppRoles] = await db.execute<UserRoleExistsRow[]>(
+        "SELECT 1 AS n FROM user_roles WHERE user_id = ? AND app_id = ? LIMIT 1",
+        [resolvedUserId, resolvedAppId]
+      );
+      if (existingAppRoles.length > 0) {
+        return NextResponse.json(
+          { error: "Already registered for this app. Please login." },
+          { status: 409 }
+        );
+      }
+      userId = resolvedUserId;
+    } else {
+      const [insertedUser] = await db.execute<ResultSetHeader>(
+        "INSERT INTO users (name, phone, password) VALUES (?, ?, ?)",
+        [normalizedName, normalizedPhone, unusablePasswordHash]
+      );
 
-    const [insertedUser] = await db.execute<ResultSetHeader>(
-      "INSERT INTO users (name, phone, password) VALUES (?, ?, ?)",
-      [normalizedName, normalizedPhone, passwordHash]
-    );
-
-    const userId = insertedUser.insertId;
-    if (!userId) {
-      throw new Error("User could not be created");
+      const insertedId = insertedUser.insertId;
+      if (!insertedId) {
+        throw new Error("User could not be created");
+      }
+      userId = insertedId;
     }
 
     await db.execute(
@@ -85,6 +117,7 @@ export async function POST(request: NextRequest) {
 
     const token = signAuthToken({
       userId,
+      name: normalizedName,
       phone: normalizedPhone,
       appId: resolvedAppId,
       roleId: defaultRole.roleId,
