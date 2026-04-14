@@ -49,6 +49,7 @@ export function QrScanner({
   const [isValidScan, setIsValidScan] = useState<boolean | null>(null);
   const [invalidHint, setInvalidHint] = useState(false);
   const [couponData, setCouponData] = useState<any>(null);
+  const [pointsNotice, setPointsNotice] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const decodeErrorCountRef = useRef(0);
   const lastApiCallAtByQrRef = useRef<Map<string, number>>(new Map());
@@ -104,6 +105,16 @@ export function QrScanner({
               }),
             });
             const data = await response.json();
+            if (typeof data?.pointsMessage === "string" && data.pointsMessage.trim()) {
+              setPointsNotice(data.pointsMessage.trim());
+            } else if (
+              typeof data?.pointsEarned === "number" &&
+              Number.isFinite(data.pointsEarned)
+            ) {
+              setPointsNotice(`Points credited: ${data.pointsEarned}`);
+            } else {
+              setPointsNotice(null);
+            }
 
             const rows = data.data;
             const hasCoupon =
@@ -215,6 +226,11 @@ export function QrScanner({
             {couponData && (
               <p className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">
                 {couponData[0]?.product_name}
+              </p>
+            )}
+            {pointsNotice && (
+              <p className="rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200">
+                {pointsNotice}
               </p>
             )}
           </>
