@@ -11,7 +11,7 @@ type QrScannerProps = {
 };
 
 /** Min time between API calls for the same QR payload (camera often decodes every frame). */
-const SAME_QR_API_COOLDOWN_MS = 5500;
+const SAME_QR_API_COOLDOWN_MS = 7500;
 
 function readDeviceCoordinates(): Promise<{
   latitude: number;
@@ -97,6 +97,7 @@ export function QrScanner({
               credentials: "include",
               body: JSON.stringify({
                 qrcode: normalized,
+                scan_data: { qr_code: normalized },
                 ...(coords
                   ? { latitude: coords.latitude, longitude: coords.longitude }
                   : {}),

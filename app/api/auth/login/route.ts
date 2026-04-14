@@ -18,11 +18,17 @@ type UserRow = RowDataPacket & {
 type UserRoleRow = RowDataPacket & {
   role_id?: number;
   brand_id?: number | null;
+  role_name?: string;
 };
 
 type DefaultRoleRow = RowDataPacket & {
   role_id?: number;
   name?: string;
+};
+
+type BrandRow = RowDataPacket & {
+  brand_id?: number;
+  brand_name?: string;
 };
 
 const resolveAppId = (rawAppId?: number) => {
@@ -56,7 +62,7 @@ type OtpRow = RowDataPacket & {
 
 export async function POST(request: NextRequest) {
   try {
-    const { phone, otp, appId } = await request.json();
+    const { phone, otp, appId, brandId } = await request.json();
 
     if (!phone || typeof phone !== "string") {
       return NextResponse.json({ error: "Phone is required" }, { status: 400 });
@@ -84,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     const [roles] = await db.execute<UserRoleRow[]>(
-      "SELECT role_id, brand_id FROM user_roles WHERE user_id = ? AND app_id = ? LIMIT 1",
+      "SELECT role_id, brand_id, role_name FROM user_roles WHERE user_id = ? AND app_id = ?",
       [userId, resolvedAppId]
     );
 
@@ -129,14 +135,80 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const defaultRole = await getDefaultRole();
+    const parsedBrandId =
+      Number.isFinite(Number(brandId)) ? Number(brandId) : undefined;
+    const brandIds = Array.from(
+      new Set(
+        roles
+          .map((r) => (r.brand_id != null ? Number(r.brand_id) : null))
+          .filter((id): id is number => id != null),
+      ),
+    );
+    const brandNameById = new Map<number, string>();
+    if (brandIds.length > 0) {
+      try {
+        const placeholders = brandIds.map(() => "?").join(", ");
+        const [brandRows] = await db.execute<BrandRow[]>(
+          `SELECT id AS brand_id, name AS brand_name FROM brands WHERE id IN (${placeholders})`,
+          brandIds,
+        );
+        for (const row of brandRows) {
+          if (row.brand_id != null && row.brand_name) {
+            brandNameById.set(Number(row.brand_id), row.brand_name);
+          }
+        }
+      } catch {
+        // Keep login resilient if brands table isn't available.
+      }
+    }
+    const brandOptions = Array.from(
+      new Map(
+        roles
+          .filter((r) => r.brand_id != null)
+          .map((r) => [
+            Number(r.brand_id),
+            {
+              brandId: Number(r.brand_id),
+              brandName:
+                brandNameById.get(Number(r.brand_id)) ??
+                `Brand ${Number(r.brand_id)}`,
+              roleId: r.role_id ?? defaultRole.roleId,
+              roleName: r.role_name ?? defaultRole.roleName,
+            },
+          ]),
+      ).values(),
+    );
+
+    if (brandOptions.length > 1 && parsedBrandId == null) {
+      return NextResponse.json({
+        requiresBrandSelection: true,
+        phone: normalizedPhone,
+        brandOptions,
+      });
+    }
+
+    let selectedRole = roles[0];
+    if (brandOptions.length > 1) {
+      const selectedByBrand = roles.find(
+        (r) => r.brand_id != null && Number(r.brand_id) === parsedBrandId,
+      );
+      if (!selectedByBrand) {
+        return NextResponse.json(
+          { error: "Please select a valid brand" },
+          { status: 400 },
+        );
+      }
+      selectedRole = selectedByBrand;
+    }
+
     await db.execute<ResultSetHeader>(
       "UPDATE otps SET consumed_at = NOW() WHERE id = ?",
       [otpRow.id],
     );
 
-    const defaultRole = await getDefaultRole();
-    const roleId = roles[0].role_id ?? defaultRole.roleId;
-    const brandId = roles[0].brand_id ?? null;
+    const roleId = selectedRole.role_id ?? defaultRole.roleId;
+    const resolvedBrandId = selectedRole.brand_id ?? null;
 
     const token = signAuthToken({
       userId,
@@ -144,7 +216,7 @@ export async function POST(request: NextRequest) {
       phone: user.phone ?? normalizedPhone,
       appId: resolvedAppId,
       roleId,
-      brandId,
+      brandId: resolvedBrandId,
     });
 
     return NextResponse.json({
@@ -156,7 +228,7 @@ export async function POST(request: NextRequest) {
         phone: user.phone ?? normalizedPhone,
         appId: resolvedAppId,
         roleId,
-        brandId,
+        brandId: resolvedBrandId,
       },
     });
   } catch (error) {

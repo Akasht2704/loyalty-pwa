@@ -25,7 +25,8 @@ type ScanRequestBody = {
   scanCity?: string;
   latitude?: number;
   longitude?: number;
-  scanData?: Record<string, unknown>;
+  /** From client: `{ "qr_code": "<raw scanned value>" }` — stored in `scan_log.scan_data` even if coupon missing. */
+  scan_data?: unknown;
 };
 
 function trimOpt(s: unknown): string | null {
@@ -43,6 +44,21 @@ function optionalInt(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+/** Persist only `{ qr_code }` from the frontend; fallback if missing or invalid. */
+function scanDataJsonFromFrontend(
+  body: ScanRequestBody,
+  fallbackQrCode: string,
+): string {
+  const raw = body.scan_data;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const qc = (raw as Record<string, unknown>).qr_code;
+    if (typeof qc === "string" && qc.trim()) {
+      return JSON.stringify({ qr_code: qc.trim() });
+    }
+  }
+  return JSON.stringify({ qr_code: fallbackQrCode });
 }
 
 export async function POST(request: NextRequest) {
@@ -101,16 +117,7 @@ export async function POST(request: NextRequest) {
         const categoryId = c ? optionalInt(c.category_id) : null;
         const subCategoryId = c ? optionalInt(c.sub_category_id) : null;
 
-        const scanDataObj: Record<string, unknown> = {
-          couponFound: couponRows.length > 0,
-        };
-        if (
-          body.scanData &&
-          typeof body.scanData === "object" &&
-          !Array.isArray(body.scanData)
-        ) {
-          Object.assign(scanDataObj, body.scanData);
-        }
+        const scanDataJson = scanDataJsonFromFrontend(body, qrcode);
 
         await db.execute(
           `INSERT INTO scan_log (
@@ -129,7 +136,7 @@ export async function POST(request: NextRequest) {
             scanDistrict,
             scanCity,
             auth.appId,
-            JSON.stringify(scanDataObj),
+            scanDataJson,
             brandIdLog,
             longitude,
             latitude,

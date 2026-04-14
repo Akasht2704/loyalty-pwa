@@ -1,0 +1,172 @@
+API Documentation
+Project: pwa_loyalty
+
+========================================
+1) POST /api/qrscan
+========================================
+
+Purpose
+- Validate scanned QR code against the coupons table.
+- For authenticated users:
+  - Save scan audit into scan_log.
+  - Resolve/assign brand role if coupon is tied to a brand.
+  - Optionally return a refreshed auth token.
+
+Authentication
+- Optional: Authorization: Bearer <jwt>
+- Without token:
+  - Coupon lookup still works.
+  - No user role update.
+  - No scan_log user audit insert.
+
+Request Body (JSON)
+{
+  "qrcode": "QR_PAYLOAD_TEXT",                    // required
+  "scan_data": { "qr_code": "QR_PAYLOAD_TEXT" },  // optional; fallback uses qrcode
+  "latitude": 28.6139,                            // optional
+  "longitude": 77.2090,                           // optional
+  "scanState": "Delhi",                           // optional
+  "scanDistrict": "New Delhi",                    // optional
+  "scanCity": "New Delhi"                         // optional
+}
+
+Field Notes
+- qrcode: required string; trimmed on server.
+- scan_data: object expected to contain qr_code string.
+  - persisted in scan_log.scan_data.
+  - if invalid/missing, server stores {"qr_code": qrcode}.
+- latitude/longitude + scanState/scanDistrict/scanCity:
+  - if any of state/district/city missing and lat/lon are present,
+    backend tries reverse geocoding (Nominatim).
+
+Success Response: Coupon Found
+{
+  "success": true,
+  "data": [ ...coupon row(s)... ],
+  "newToken": "<optional refreshed jwt>",
+  "user": {
+    "userId": 12,
+    "name": "User Name",
+    "phone": "9999999999",
+    "appId": 1,
+    "roleId": 4,
+    "brandId": 2
+  }
+}
+
+Success Response: Coupon Not Found
+{
+  "success": false,
+  "error": "Coupon not found",
+  "data": []
+}
+
+Error Responses
+- 400: { "error": "QR code is required" }
+- 500: { "error": "<server error message>" }
+
+Authenticated Side Effects
+1. Insert into scan_log (best-effort; failures are logged and do not fail API response).
+2. If coupon has brand_id:
+   - Find brand default role.
+   - Update user_roles row where brand_id IS NULL for same user+app.
+   - If no update happened, insert new row only if same (user_id, app_id, role_id, brand_id) does not already exist.
+3. If role/brand resolved, issue newToken and return updated user object.
+
+
+========================================
+2) POST /api/auth/login
+========================================
+
+Purpose
+- Phone + OTP based login.
+- Supports multi-brand users per app:
+  - if multiple brands exist, API asks frontend to choose brand before issuing final token.
+
+Authentication
+- Public endpoint (no bearer token required).
+
+Request Body (JSON)
+{
+  "phone": "9999999999",  // required
+  "otp": "1234",          // optional on first step; required on OTP step
+  "appId": 1,             // optional; falls back to APP_ID env
+  "brandId": 2            // optional; required only when API asks brand selection
+}
+
+Flow
+Step 1: Phone submitted without OTP
+- Verifies user existence and app role mapping.
+- If eligible, creates OTP row and returns requiresOtp.
+
+Step 2: Phone + OTP submitted
+- Validates OTP from otps table.
+- If multiple brand choices exist and brandId not provided:
+  - returns requiresBrandSelection with options.
+- If brandId is provided:
+  - validates selected brand for this user/app.
+  - consumes OTP.
+  - signs JWT and returns success response.
+
+Possible Responses
+
+A) User not found -> registration flow
+{
+  "requiresRegistration": true,
+  "phone": "9999999999"
+}
+
+B) Existing user but not registered for this app
+{
+  "requiresRegistration": true,
+  "phone": "9999999999",
+  "existingUser": true
+}
+
+C) OTP required
+{
+  "requiresOtp": true,
+  "phone": "9999999999"
+}
+
+D) Multiple brands found, frontend must select
+{
+  "requiresBrandSelection": true,
+  "phone": "9999999999",
+  "brandOptions": [
+    {
+      "brandId": 2,
+      "brandName": "Brand Alpha",
+      "roleId": 4,
+      "roleName": "Retailer"
+    }
+  ]
+}
+
+E) Successful login
+{
+  "success": true,
+  "token": "<jwt>",
+  "user": {
+    "userId": 12,
+    "name": "User Name",
+    "phone": "9999999999",
+    "appId": 1,
+    "roleId": 4,
+    "brandId": 2
+  }
+}
+
+F) Errors
+- 400: { "error": "Phone is required" }
+- 400: { "error": "Please select a valid brand" }
+- 401: { "error": "Invalid or expired OTP" }
+- 500: { "error": "Login failed" } (or specific message)
+
+Notes
+- OTP is currently hardcoded in backend as 1234 (temporary).
+- JWT payload includes userId, name, phone, appId, roleId, brandId.
+- Frontend should:
+  1) submit phone -> wait requiresOtp
+  2) submit otp -> if requiresBrandSelection, show brand dropdown
+  3) submit otp + brandId -> final success token

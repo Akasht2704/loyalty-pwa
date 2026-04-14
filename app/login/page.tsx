@@ -10,6 +10,13 @@ type LoginResponse = {
   user?: Record<string, unknown>;
   requiresRegistration?: boolean;
   requiresOtp?: boolean;
+  requiresBrandSelection?: boolean;
+  brandOptions?: Array<{
+    brandId: number;
+    brandName: string;
+    roleId: number;
+    roleName: string;
+  }>;
   existingUser?: boolean;
   phone?: string;
   error?: string;
@@ -21,6 +28,10 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [showOtpStep, setShowOtpStep] = useState(false);
+  const [brandOptions, setBrandOptions] = useState<
+    Array<{ brandId: number; brandName: string; roleId: number; roleName: string }>
+  >([]);
+  const [selectedBrandId, setSelectedBrandId] = useState<string>("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -36,6 +47,10 @@ export default function LoginPage() {
         body: JSON.stringify({
           phone,
           otp: showOtpStep ? otp : undefined,
+          brandId:
+            showOtpStep && selectedBrandId
+              ? Number(selectedBrandId)
+              : undefined,
           appId: Number.isInteger(appId) ? appId : undefined,
         }),
       });
@@ -55,6 +70,16 @@ export default function LoginPage() {
       }
 
       if (data.requiresOtp) {
+        setShowOtpStep(true);
+        setBrandOptions([]);
+        setSelectedBrandId("");
+        return;
+      }
+
+      if (data.requiresBrandSelection) {
+        const options = Array.isArray(data.brandOptions) ? data.brandOptions : [];
+        setBrandOptions(options);
+        setSelectedBrandId(options[0] ? String(options[0].brandId) : "");
         setShowOtpStep(true);
         return;
       }
@@ -120,22 +145,43 @@ export default function LoginPage() {
             </label>
 
             {showOtpStep ? (
-              <label className="block">
-                <span className="text-sm text-slate-200">
-                  OTP
-                </span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  required
-                  maxLength={8}
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
-                  placeholder="Enter OTP"
-                />
-              </label>
+              <>
+                <label className="block">
+                  <span className="text-sm text-slate-200">
+                    OTP
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    required
+                    maxLength={8}
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    className="mt-1 w-full border-0 border-b border-slate-500 bg-transparent px-1 py-3 text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-indigo-300"
+                    placeholder="Enter OTP"
+                  />
+                </label>
+                {brandOptions.length > 1 ? (
+                  <label className="block">
+                    <span className="text-sm text-slate-200">
+                      Select Brand
+                    </span>
+                    <select
+                      required
+                      value={selectedBrandId}
+                      onChange={(e) => setSelectedBrandId(e.target.value)}
+                      className="mt-1 w-full rounded-md border border-slate-500 bg-slate-900 px-2 py-3 text-slate-100 outline-none transition focus:border-indigo-300"
+                    >
+                      {brandOptions.map((opt) => (
+                        <option key={opt.brandId} value={String(opt.brandId)}>
+                          {`${opt.brandName} (${opt.roleName})`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </>
             ) : null}
 
             {error ? (
