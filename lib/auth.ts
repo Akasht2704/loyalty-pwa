@@ -9,6 +9,13 @@ export type AuthJwtPayload = {
   name: string;
 };
 
+export type BasicAuthTokenPayload = {
+  appId: number;
+  roleId: number;
+  userId: number;
+  brandId: number | null;
+};
+
 const getJwtSecret = () => {
   const secret =
     process.env.AUTH_SECRET ??
@@ -59,6 +66,58 @@ export const parseAuthJwtPayload = (decoded: unknown): AuthJwtPayload | null => 
 
 export const signAuthToken = (payload: AuthJwtPayload) => {
   return jwt.sign(payload, getJwtSecret(), { expiresIn: "7d" });
+};
+
+export const signBasicAuthToken = (payload: {
+  userId: number;
+  brandId: number | null;
+  appId: number;
+  roleId: number;
+}) => {
+  const tokenPayload: BasicAuthTokenPayload = {
+    appId: payload.appId,
+    roleId: payload.roleId,
+    userId: payload.userId,
+    brandId: payload.brandId,
+  };
+
+  return jwt.sign(tokenPayload, getJwtSecret(), { expiresIn: "7d" });
+};
+
+export const parseBasicAuthTokenPayload = (
+  decoded: unknown,
+): BasicAuthTokenPayload | null => {
+  if (!decoded || typeof decoded !== "object") return null;
+  const d = decoded as Record<string, unknown>;
+  const userId = jwtNumeric(d.userId);
+  const appId = jwtNumeric(d.appId);
+  const roleId = jwtNumeric(d.roleId);
+  if (userId === null || appId === null || roleId === null) return null;
+
+  let brandId: number | null;
+  if (d.brandId === null || d.brandId === undefined) {
+    brandId = null;
+  } else {
+    const b = jwtNumeric(d.brandId);
+    if (b === null) return null;
+    brandId = b;
+  }
+
+  return {
+    userId,
+    appId,
+    roleId,
+    brandId,
+  };
+};
+
+export const verifyBasicAuthToken = (token: string): BasicAuthTokenPayload | null => {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret());
+    return parseBasicAuthTokenPayload(decoded);
+  } catch {
+    return null;
+  }
 };
 
 export const verifyAuthToken = (token: string): AuthJwtPayload | null => {
