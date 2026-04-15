@@ -41,8 +41,9 @@ export async function POST(request: NextRequest) {
       `SELECT c.product_name, p.mrp, c.qr_code
        FROM coupons c
        LEFT JOIN products p ON p.id = c.product_id
-       WHERE batch_id = ? 
-       ORDER BY c.id ASC`,
+       WHERE c.batch_id = ?
+       ORDER BY c.id ASC
+       LIMIT 5`,
       [batchId],
     );
 
