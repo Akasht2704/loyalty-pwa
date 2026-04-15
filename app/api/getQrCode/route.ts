@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
         const mrpValue = mrpRaw ? `INR ${mrpRaw}` : "INR 0";
 
         return {
-          PoductName: productName,
+          ProductName: productName,
           MRP: mrpValue,
           ...(qrCode ? { QRCODE: qrCode } : {}),
         };
