@@ -226,6 +226,80 @@ export async function assignRoleForCouponBrand(params: {
     return { roleIdForPoints, roleNameForPoints, brandIdForPoints };
   }
 
+  const [membershipRows] = await db.execute<RowDataPacket[]>(
+    "SELECT role_id, role_name FROM user_roles WHERE user_id = ? AND app_id = ? AND brand_id = ? LIMIT 1",
+    [auth.userId, auth.appId, brandId],
+  );
+  const membershipRoleId = optionalInt(membershipRows[0]?.role_id);
+  if (membershipRoleId != null) {
+    let nameForMembership = "";
+    const rn = membershipRows[0]?.role_name;
+    if (typeof rn === "string" && rn.trim()) {
+      nameForMembership = rn.trim();
+    } else {
+      const [nRows] = await db.execute<RoleRow[]>(
+        "SELECT name FROM roles WHERE id = ? LIMIT 1",
+        [membershipRoleId],
+      );
+      nameForMembership = String(nRows[0]?.name ?? "");
+    }
+    roleIdForPoints = membershipRoleId;
+    roleNameForPoints = nameForMembership;
+    brandIdForPoints = brandId;
+    newToken = signAuthToken({
+      userId: auth.userId,
+      name: auth.name,
+      phone,
+      appId: auth.appId,
+      roleId: membershipRoleId,
+      brandId,
+    });
+    sessionUser = {
+      userId: auth.userId,
+      name: auth.name,
+      phone,
+      appId: auth.appId,
+      roleId: membershipRoleId,
+      brandId,
+    };
+    return { roleIdForPoints, roleNameForPoints, brandIdForPoints, newToken, sessionUser };
+  }
+
+  if (
+    initialBrandIdForPoints != null &&
+    initialBrandIdForPoints === brandId &&
+    initialRoleIdForPoints != null
+  ) {
+    roleIdForPoints = initialRoleIdForPoints;
+    let nameFromJwt = initialRoleNameForPoints.trim();
+    if (!nameFromJwt) {
+      const [nRows] = await db.execute<RoleRow[]>(
+        "SELECT name FROM roles WHERE id = ? LIMIT 1",
+        [initialRoleIdForPoints],
+      );
+      nameFromJwt = String(nRows[0]?.name ?? "");
+    }
+    roleNameForPoints = nameFromJwt;
+    brandIdForPoints = brandId;
+    newToken = signAuthToken({
+      userId: auth.userId,
+      name: auth.name,
+      phone,
+      appId: auth.appId,
+      roleId: initialRoleIdForPoints,
+      brandId,
+    });
+    sessionUser = {
+      userId: auth.userId,
+      name: auth.name,
+      phone,
+      appId: auth.appId,
+      roleId: initialRoleIdForPoints,
+      brandId,
+    };
+    return { roleIdForPoints, roleNameForPoints, brandIdForPoints, newToken, sessionUser };
+  }
+
   const [roleRows] = await db.execute<RoleRow[]>(
     "SELECT id AS role_id, name FROM roles WHERE is_default = TRUE AND brand_id = ? LIMIT 1",
     [brandId],

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import { getBearerToken, signAuthToken, verifyAuthToken } from "@/lib/auth";
+import { getBearerToken, verifyAuthToken } from "@/lib/auth";
 import { db } from "@/lib/db";
+import {
+  assignRoleForCouponBrand,
+  creditPointsForScan,
+} from "@/lib/qrscan/service";
 import { reverseGeocodeNominatim } from "@/lib/reverse-geocode";
 
 type CouponRow = RowDataPacket & {
@@ -14,25 +18,6 @@ type CouponRow = RowDataPacket & {
   sub_category_id?: number | null;
   category_name?: string | null;
   sub_category_name?: string | null;
-};
-
-type RoleRow = RowDataPacket & {
-  role_id?: number;
-  name?: string;
-  loyalty_sequence?: string | { role_id?: unknown } | null;
-};
-
-type ProductRow = RowDataPacket & {
-  scheme_id?: number | null;
-  category_id?: number | null;
-  sub_category_id?: number | null;
-};
-
-type SchemeDetailRow = RowDataPacket & {
-  scheme_detail_id?: number;
-  role_id?: number | null;
-  value?: number | string | null;
-  expiry_days?: number | string | null;
 };
 
 type ScanRequestBody = {
@@ -61,34 +46,6 @@ function optionalInt(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-
-function optionalNumber(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function expiryDateFromDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + Math.max(0, Math.trunc(days)));
-  return d.toISOString().slice(0, 10);
-}
-
-function parseRoleIdsFromLoyaltySequence(raw: unknown): number[] {
-  if (!raw) return [];
-  try {
-    const parsed =
-      typeof raw === "string"
-        ? (JSON.parse(raw) as { role_id?: unknown })
-        : (raw as { role_id?: unknown });
-    const roleIds = Array.isArray(parsed?.role_id) ? parsed.role_id : [];
-    return roleIds
-      .map((v) => optionalInt(v))
-      .filter((v): v is number => v != null);
-  } catch {
-    return [];
-  }
 }
 
 /** Persist only `{ qr_code }` from the frontend; fallback if missing or invalid. */
@@ -244,218 +201,42 @@ export async function POST(request: NextRequest) {
       | undefined;
 
     if (auth) {
-      const userId = auth.userId;
-      const appId = auth.appId;
       const phone = auth.phone.trim();
-
       if (phone) {
-        const brandRaw = coupon.brand_id;
-        const brandId =
-          brandRaw != null && Number.isFinite(Number(brandRaw))
-            ? Number(brandRaw)
-            : null;
-
-        if (brandId != null) {
-          const [roleRows] = await db.execute<RoleRow[]>(
-            "SELECT id AS role_id, name FROM roles WHERE is_default = TRUE AND brand_id = ? LIMIT 1",
-            [brandId],
-          );
-
-          const role = roleRows[0];
-          if (role?.role_id != null && role.name) {
-            const roleId = role.role_id;
-            const roleName = role.name;
-              roleIdForPoints = roleId;
-              roleNameForPoints = roleName;
-              brandIdForPoints = brandId;
-
-            const [updateHeader] = await db.execute<ResultSetHeader>(
-              "UPDATE user_roles SET role_id = ?, role_name = ?, brand_id = ? WHERE user_id = ? AND app_id = ? AND brand_id IS NULL",
-              [roleId, roleName, brandId, userId, appId],
-            );
-
-            if (updateHeader.affectedRows === 0) {
-              const [already] = await db.execute<RowDataPacket[]>(
-                "SELECT 1 AS ok FROM user_roles WHERE user_id = ? AND app_id = ? AND role_id = ? AND brand_id = ? LIMIT 1",
-                [userId, appId, roleId, brandId],
-              );
-              if (already.length === 0) {
-                await db.execute(
-                  "INSERT INTO user_roles (user_id, app_id, role_id, role_name, brand_id) VALUES (?, ?, ?, ?, ?)",
-                  [userId, appId, roleId, roleName, brandId],
-                );
-              }
-            }
-
-            newToken = signAuthToken({
-              userId,
-              name: auth.name,
-              phone,
-              appId,
-              roleId,
-              brandId,
-            });
-
-            sessionUser = {
-              userId,
-              name: auth.name,
-              phone,
-              appId,
-              roleId,
-              brandId,
-            };
-          }
-        }
+        const roleAssignment = await assignRoleForCouponBrand({
+          auth,
+          coupon,
+          initialRoleIdForPoints: roleIdForPoints,
+          initialBrandIdForPoints: brandIdForPoints,
+          initialRoleNameForPoints: roleNameForPoints,
+        });
+        roleIdForPoints = roleAssignment.roleIdForPoints;
+        roleNameForPoints = roleAssignment.roleNameForPoints;
+        brandIdForPoints = roleAssignment.brandIdForPoints;
+        newToken = roleAssignment.newToken;
+        sessionUser = roleAssignment.sessionUser;
       }
     }
 
     if (auth && scanLogId && couponRows.length > 0) {
-      try {
-        const coupon = couponRows[0];
-        const couponId = optionalInt(coupon.id);
-        const couponProductId = optionalInt(coupon.product_id);
-        const fallbackCategoryId = optionalInt(coupon.category_id);
-        const fallbackSubCategoryId = optionalInt(coupon.sub_category_id);
-        const fallbackCategoryName =
-          typeof coupon.category_name === "string" ? coupon.category_name : null;
-        const fallbackSubCategoryName =
-          typeof coupon.sub_category_name === "string" ? coupon.sub_category_name : null;
-        const productName =
-          typeof coupon.product_name === "string" ? coupon.product_name : null;
-
-        let schemeId: number | null = null;
-        let categoryId: number | null = fallbackCategoryId;
-        let subCategoryId: number | null = fallbackSubCategoryId;
-        let categoryName: string | null = fallbackCategoryName;
-        let subCategoryName: string | null = fallbackSubCategoryName;
-
-        if (couponProductId != null) {
-          const [productRows] = await db.execute<ProductRow[]>(
-            `SELECT scheme_id, category_id, sub_category_id
-             FROM products
-             WHERE id = ?
-             LIMIT 1`,
-            [couponProductId],
-          );
-          const product = productRows[0];
-          schemeId = optionalInt(product?.scheme_id);
-          categoryId = optionalInt(product?.category_id) ?? categoryId;
-          subCategoryId = optionalInt(product?.sub_category_id) ?? subCategoryId;
-        }
-
-        if (schemeId != null && roleIdForPoints != null) {
-          const [alreadyPointRows] = await db.execute<RowDataPacket[]>(
-            "SELECT 1 AS ok FROM point_in_txn WHERE qr_code = ? AND user_role_id = ? LIMIT 1",
-            [qrcode, roleIdForPoints],
-          );
-          if (alreadyPointRows.length > 0) {
-            pointsMessage = "This QR is already scanned for this role";
-          } else {
-            const pointsBrandId = optionalInt(coupon.brand_id) ?? brandIdForPoints;
-            const [currentRoleRows] = await db.execute<RoleRow[]>(
-              "SELECT loyalty_sequence FROM roles WHERE id = ? LIMIT 1",
-              [roleIdForPoints],
-            );
-            const currentRole = currentRoleRows[0];
-            const allowedPriorRoleIds = parseRoleIdsFromLoyaltySequence(
-              currentRole?.loyalty_sequence,
-            );
-            const [priorScanRoleRows] =
-              pointsBrandId != null
-                ? await db.execute<RowDataPacket[]>(
-                    `SELECT DISTINCT user_role_id
-                     FROM point_in_txn
-                     WHERE qr_code = ? AND brand_id = ?`,
-                    [qrcode, pointsBrandId],
-                  )
-                : await db.execute<RowDataPacket[]>(
-                    `SELECT DISTINCT user_role_id
-                     FROM point_in_txn
-                     WHERE qr_code = ?`,
-                    [qrcode],
-                  );
-            const priorScanRoleIds = priorScanRoleRows
-              .map((row) => optionalInt(row.user_role_id))
-              .filter((id): id is number => id != null);
-            const blockedByRoleSequence = priorScanRoleIds.some(
-              (priorRoleId) => !allowedPriorRoleIds.includes(priorRoleId),
-            );
-
-            if (blockedByRoleSequence) {
-              pointsMessage = "This QR is already scanned";
-            } else {
-              const [schemeDetailRows] =
-                pointsBrandId != null
-                  ? await db.execute<SchemeDetailRow[]>(
-                      `SELECT id AS scheme_detail_id, role_id, value, expiry_days
-                       FROM scheme_details
-                       WHERE scheme_id = ? AND brand_id = ? AND role_id = ?
-                       LIMIT 1`,
-                      [schemeId, pointsBrandId, roleIdForPoints],
-                    )
-                  : await db.execute<SchemeDetailRow[]>(
-                      `SELECT id AS scheme_detail_id, role_id, value, expiry_days
-                       FROM scheme_details
-                       WHERE scheme_id = ? AND role_id = ?
-                       LIMIT 1`,
-                      [schemeId, roleIdForPoints],
-                    );
-              const schemeDetail = schemeDetailRows[0];
-              const schemeDetailId = optionalInt(schemeDetail?.scheme_detail_id);
-              const pointsEarned = optionalNumber(schemeDetail?.value);
-              const expiryDays = optionalInt(schemeDetail?.expiry_days) ?? 0;
-
-              if (
-                schemeDetailId != null &&
-                pointsEarned != null &&
-                pointsEarned > 0
-              ) {
-                const pointExpiryDate = expiryDateFromDays(expiryDays);
-                await db.execute(
-                  `INSERT INTO point_in_txn (
-                    scan_log_id, coupon_id, qr_code, user_id, user_name, user_phone,
-                    user_role_id, user_role_name, scan_state, scan_district, scan_city,
-                    app_id, brand_id, category_id, category_name, sub_category_id,
-                    sub_category_name, product_id, product_name, scheme_detail_id,
-                    points_earned, point_expiry_date
-                  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                  [
-                    scanLogId,
-                    couponId,
-                    qrcode,
-                    auth.userId,
-                    auth.name,
-                    auth.phone,
-                    roleIdForPoints ?? auth.roleId,
-                    roleNameForPoints || userRoleNameForLog,
-                    scanState,
-                    scanDistrict,
-                    scanCity,
-                    auth.appId,
-                    brandIdForPoints,
-                    categoryId,
-                    categoryName,
-                    subCategoryId,
-                    subCategoryName,
-                    couponProductId,
-                    productName,
-                    schemeDetailId,
-                    pointsEarned,
-                    pointExpiryDate,
-                  ],
-                );
-                pointsMessage = `Points credited: ${pointsEarned}`;
-                pointsEarnedValue = pointsEarned;
-              }
-            }
-          }
-        }
-      } catch (pointsErr) {
-        console.error("point_in_txn insert failed:", pointsErr);
-        const msg = (pointsErr as { code?: string; message?: string })?.code;
-        if (msg === "ER_DUP_ENTRY") {
-          pointsMessage = "This QR is already scanned for this role";
-        }
+      const pointsResult = await creditPointsForScan({
+        auth,
+        scanLogId,
+        coupon: couponRows[0],
+        qrcode,
+        roleIdForPoints,
+        roleNameForPoints,
+        brandIdForPoints,
+        scanState,
+        scanDistrict,
+        scanCity,
+        userRoleNameForLog,
+      });
+      if (pointsResult.pointsMessage) {
+        pointsMessage = pointsResult.pointsMessage;
+      }
+      if (pointsResult.pointsEarnedValue != null) {
+        pointsEarnedValue = pointsResult.pointsEarnedValue;
       }
     }
 
