@@ -19,10 +19,4 @@ export const HOME_SERVICES: HomeServiceItem[] = [
     icon: "📋",
     href: "/scan-logs",
   },
-  {
-    kind: "card",
-    title: "Dispatch",
-    description: "View dispatch updates and shipment progress.",
-    icon: "🚚",
-  },
 ];
