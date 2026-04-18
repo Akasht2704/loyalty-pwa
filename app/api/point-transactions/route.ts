@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       FROM point_in_txn t
       WHERE t.user_id = ? AND t.app_id = ?
     `;
-    const params: unknown[] = [auth.userId, auth.appId];
+    const params: (string | number)[] = [auth.userId, auth.appId];
 
     if (from && to) {
       sql += ` AND DATE(t.created_at) >= ? AND DATE(t.created_at) <= ?`;

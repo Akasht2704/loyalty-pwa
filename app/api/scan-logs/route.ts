@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       FROM scan_log sl
       WHERE sl.user_id = ? AND sl.app_id = ?
     `;
-    const params: unknown[] = [auth.userId, auth.appId];
+    const params: (string | number)[] = [auth.userId, auth.appId];
 
     if (from && to) {
       sql += ` AND DATE(sl.created_at) >= ? AND DATE(sl.created_at) <= ?`;
