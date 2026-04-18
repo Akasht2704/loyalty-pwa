@@ -1,0 +1,26 @@
+import Link from "next/link";
+import type { ReactNode } from "react";
+
+type ServiceLinkCardProps = {
+  title: string;
+  icon: ReactNode;
+  href: string;
+};
+
+export function ServiceLinkCard({ title, icon, href }: ServiceLinkCardProps) {
+  return (
+    <Link href={href} className="group relative block md:w-[10vw]">
+      <div className="relative flex flex-col items-center justify-center gap-4 rounded-xl bg-white/90 p-4 shadow-sm backdrop-blur-sm transition duration-300 group-active:scale-[0.99] group-hover:border-indigo-200/80 group-hover:shadow-md group-hover:shadow-indigo-900/5 dark:border-zinc-700/90 dark:bg-zinc-900/75 dark:group-hover:border-indigo-500/25">
+        <div
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-100 to-violet-100 text-2xl shadow-inner shadow-white/50 dark:from-indigo-950 dark:to-violet-950 dark:shadow-none"
+          aria-hidden
+        >
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1 pt-0.5 text-center">
+          <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">{title}</h3>
+        </div>
+      </div>
+    </Link>
+  );
+}
