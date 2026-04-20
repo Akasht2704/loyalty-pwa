@@ -10,7 +10,7 @@ export const HOME_SERVICES: HomeServiceItem[] = [
     title: "Loyalty",
     description: "Track points, rewards, and member benefits.",
     icon: "⭐",
-    href: "/loyalty",
+    href: "/loyalty/brands",
   },
   {
     kind: "link",

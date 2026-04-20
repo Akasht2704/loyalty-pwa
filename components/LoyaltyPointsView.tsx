@@ -64,6 +64,8 @@ function formatPoints(n: number | null) {
 export function LoyaltyPointsView() {
   const { data: session, status } = useSession();
   const token = session?.accessToken;
+  const [brandId, setBrandId] = useState<number | null>(null);
+  const [brandName, setBrandName] = useState<string>("");
   const defaults = useMemo(() => defaultDateRange(), []);
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
@@ -74,11 +76,11 @@ export function LoyaltyPointsView() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const loadList = useCallback(async () => {
-    if (!token) return;
+    if (!token || brandId == null) return;
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ from, to });
+      const qs = new URLSearchParams({ from, to, brand_id: String(brandId) });
       const res = await fetch(`/api/point-transactions?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -95,13 +97,55 @@ export function LoyaltyPointsView() {
     } finally {
       setLoading(false);
     }
-  }, [token, from, to]);
+  }, [token, from, to, brandId]);
 
   useEffect(() => {
-    if (status === "authenticated" && token) {
+    if (typeof window === "undefined") return;
+    const rawBrandId = new URLSearchParams(window.location.search).get("brand_id");
+    if (!rawBrandId) {
+      setBrandId(null);
+      return;
+    }
+    const parsed = Number(rawBrandId);
+    setBrandId(Number.isInteger(parsed) && parsed > 0 ? parsed : null);
+  }, []);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !token || brandId == null) return;
+
+    let isMounted = true;
+    const loadBrandName = async () => {
+      try {
+        const res = await fetch("/api/user-brands", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = (await res.json()) as {
+          data?: Array<{ brandId: number; brandName: string }>;
+        };
+        if (!res.ok || !Array.isArray(body.data)) return;
+
+        const selected = body.data.find((b) => b.brandId === brandId);
+        if (isMounted) {
+          setBrandName(selected?.brandName?.trim() ? selected.brandName : `Brand ${brandId}`);
+        }
+      } catch {
+        if (isMounted) {
+          setBrandName(`Brand ${brandId}`);
+        }
+      }
+    };
+
+    void loadBrandName();
+    return () => {
+      isMounted = false;
+    };
+  }, [status, token, brandId]);
+
+  useEffect(() => {
+    if (status === "authenticated" && token && brandId != null) {
       void loadList();
     }
-  }, [status, token, loadList]);
+  }, [status, token, brandId, loadList]);
 
   const openDetail = async (id: number) => {
     if (!token) return;
@@ -142,9 +186,29 @@ export function LoyaltyPointsView() {
     );
   }
 
+  if (brandId == null) {
+    return (
+      <section className="w-full p-1">
+        <p className="text-sm text-slate-300">
+          Select a brand first to view loyalty points earned for that brand.
+        </p>
+        <Link
+          href="/loyalty/brands"
+          className="mx-auto mt-6 block w-2/3 rounded-2xl bg-indigo-500 px-4 py-3 text-center text-sm font-semibold text-white shadow-md shadow-indigo-900/30 transition hover:bg-indigo-400 active:scale-[0.99]"
+        >
+          Select brand
+        </Link>
+      </section>
+    );
+  }
+
   return (
     <>
       <section className="flex min-h-0 w-full flex-1 flex-col p-1 [color-scheme:dark]">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Brand</p>
+        <p className="mt-1 text-sm text-slate-200">{brandName || `Brand ${brandId}`}</p>
+
+        <div className="mt-5" />
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Date range</p>
         <p className="mt-1 text-sm text-slate-300">Filter by when points were credited, then apply.</p>
 

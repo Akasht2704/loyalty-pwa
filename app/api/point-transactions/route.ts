@@ -17,6 +17,13 @@ const dateOnly = (raw: string | null): string | null => {
   return t;
 };
 
+const positiveInt = (raw: string | null): number | null => {
+  if (!raw) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+};
+
 const toNumber = (v: unknown): number | null => {
   if (v === null || v === undefined) return null;
   const n = Number(v);
@@ -34,6 +41,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const from = dateOnly(searchParams.get("from"));
     const to = dateOnly(searchParams.get("to"));
+    const brandId = positiveInt(searchParams.get("brand_id"));
 
     let sql = `
       SELECT t.id, t.qr_code, t.points_earned, t.created_at
@@ -45,6 +53,11 @@ export async function GET(request: NextRequest) {
     if (from && to) {
       sql += ` AND DATE(t.created_at) >= ? AND DATE(t.created_at) <= ?`;
       params.push(from, to);
+    }
+
+    if (brandId !== null) {
+      sql += ` AND t.brand_id = ?`;
+      params.push(brandId);
     }
 
     sql += ` ORDER BY t.id DESC LIMIT 300`;
